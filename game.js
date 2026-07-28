@@ -42,11 +42,22 @@ const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 const themeToggleBtn = document.getElementById('theme-toggle');
+const highscoresListEl = document.getElementById('highscores-list');
+const resetScoresBtn = document.getElementById('reset-scores-btn');
+const overlayStatsEl = document.getElementById('overlay-stats');
+const overlayHighscoresListEl = document.getElementById('overlay-highscores-list');
+const newHighscoreFormEl = document.getElementById('new-highscore-form');
+const playerNameInput = document.getElementById('player-name-input');
+const saveScoreBtn = document.getElementById('save-score-btn');
 
 const THEME_KEY = 'tetris-theme';
+const HIGHSCORES_KEY = 'tetris-highscores';
+const MAX_HIGHSCORES = 5;
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
 let gridColor = '#22222e';
+let combo = 0;
+let maxCombo = 0;
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
@@ -115,6 +126,14 @@ function clearLines() {
     level = Math.floor(lines / 10) + 1;
     dropInterval = Math.max(100, 1000 - (level - 1) * 90);
     updateHUD();
+  }
+
+  // Combo: piezas consecutivas que limpian líneas sin fallar en medio
+  if (cleared > 0) {
+    combo++;
+    if (combo > maxCombo) maxCombo = combo;
+  } else {
+    combo = 0;
   }
 }
 
@@ -251,6 +270,8 @@ function endGame() {
   overlayTitle.textContent = 'GAME OVER';
   overlayScore.textContent = `Puntuación: ${score.toLocaleString()}`;
   overlay.classList.remove('hidden');
+
+  showGameOverHighscores();
 }
 
 function togglePause() {
@@ -299,6 +320,10 @@ function init() {
   overlay.classList.add('hidden');
   cancelAnimationFrame(animId);
   animId = requestAnimationFrame(loop);
+
+  combo = 0;
+  maxCombo = 0;
+  newHighscoreFormEl.classList.add('hidden');
 }
 
 function applyTheme(theme) {
@@ -346,5 +371,99 @@ document.addEventListener('keydown', e => {
 });
 
 restartBtn.addEventListener('click', init);
+
+// ---- Tabla de récords (localStorage) ----
+
+function loadHighscores() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HIGHSCORES_KEY));
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHighscores(list) {
+  localStorage.setItem(HIGHSCORES_KEY, JSON.stringify(list));
+}
+
+function qualifiesForHighscore(list, currentScore) {
+  return list.length < MAX_HIGHSCORES || currentScore > list[list.length - 1].score;
+}
+
+function addHighscore(name, currentScore) {
+  const list = loadHighscores();
+  const entry = {
+    nombre: name || 'Jugador',
+    score: currentScore,
+    lines,
+    combo: maxCombo,
+    fecha: new Date().toLocaleDateString('es-ES'),
+  };
+  list.push(entry);
+  list.sort((a, b) => b.score - a.score);
+  const trimmed = list.slice(0, MAX_HIGHSCORES);
+  saveHighscores(trimmed);
+  return { list: trimmed, entry: trimmed.includes(entry) ? entry : null };
+}
+
+function renderHighscores(listEl, list, highlightEntry) {
+  listEl.innerHTML = '';
+  if (!list.length) {
+    const li = document.createElement('li');
+    li.textContent = 'Sin récords todavía';
+    li.classList.add('empty');
+    listEl.appendChild(li);
+    return;
+  }
+  list.forEach((entry, i) => {
+    const li = document.createElement('li');
+    li.textContent = `${i + 1}. ${entry.nombre} — ${entry.score.toLocaleString()} (L${entry.lines} · C${entry.combo})`;
+    if (entry === highlightEntry) li.classList.add('highlight');
+    listEl.appendChild(li);
+  });
+}
+
+function renderStartHighscores() {
+  renderHighscores(highscoresListEl, loadHighscores());
+}
+
+function showGameOverHighscores() {
+  overlayStatsEl.textContent = `Líneas: ${lines} · Mejor combo: ${maxCombo}`;
+
+  const list = loadHighscores();
+  if (qualifiesForHighscore(list, score)) {
+    newHighscoreFormEl.classList.remove('hidden');
+    playerNameInput.value = '';
+    renderHighscores(overlayHighscoresListEl, list);
+    playerNameInput.focus();
+  } else {
+    newHighscoreFormEl.classList.add('hidden');
+    renderHighscores(overlayHighscoresListEl, list);
+  }
+}
+
+function confirmHighscore() {
+  const name = playerNameInput.value.trim() || 'Jugador';
+  const { list, entry } = addHighscore(name, score);
+  renderHighscores(overlayHighscoresListEl, list, entry);
+  renderStartHighscores();
+  newHighscoreFormEl.classList.add('hidden');
+}
+
+function resetHighscores() {
+  if (!confirm('¿Seguro que quieres borrar todos los récords?')) return;
+  localStorage.removeItem(HIGHSCORES_KEY);
+  renderStartHighscores();
+  renderHighscores(overlayHighscoresListEl, loadHighscores());
+}
+
+saveScoreBtn.addEventListener('click', confirmHighscore);
+playerNameInput.addEventListener('keydown', e => {
+  if (e.code === 'Enter') confirmHighscore();
+});
+resetScoresBtn.addEventListener('click', resetHighscores);
+
+renderStartHighscores();
 
 init();
